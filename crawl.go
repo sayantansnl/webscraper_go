@@ -2,50 +2,58 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/url"
 )
 
-func crawlPage(rawBaseURL, rawCurrentURL string, pages map[string]int) {
-	baseURL, err := url.Parse(rawBaseURL)
-	if err != nil {
-		log.Fatalf("couldn't parse baseURL: %v", err)
+func (cfg *config) crawlPage(rawCurrentURL string) {
+	cfg.concurrencyControl <- struct{}{}
+	defer func() {
+		<-cfg.concurrencyControl
+		cfg.wg.Done()
+	}()
+
+	if !cfg.checkPageLen() {
+		return
 	}
 
 	currentURL, err := url.Parse(rawCurrentURL)
 	if err != nil {
-		log.Fatalf("couldn't parse currentURL: %v", err)
+		fmt.Printf("Error - crawlPage: couldn't parse URL '%s': %v\n", rawCurrentURL, err)
+		return
 	}
 
-	if baseURL.Host != currentURL.Host {
+	// stay within the same site
+	if currentURL.Hostname() != cfg.baseURL.Hostname() {
 		return
 	}
 
 	normalizedURL, err := normalizeURL(rawCurrentURL)
 	if err != nil {
-		log.Fatalf("unable to normalize current URL %s, error: %v", rawCurrentURL, err)
-	}
-
-	if val, ok := pages[normalizedURL]; ok {
-		pages[normalizedURL] = val + 1
+		fmt.Printf("Error - normalizedURL: %v", err)
 		return
 	}
 
-	pages[normalizedURL] = 1
+	// Only proceed the first time we see this normalized URL
+	isFirst := cfg.addPageVisit(normalizedURL)
+	if !isFirst {
+		return
+	}
+
+	fmt.Printf("crawling %s\n", rawCurrentURL)
 
 	htmlBody, err := getHTML(rawCurrentURL)
 	if err != nil {
-		log.Fatalf("couldn't get HTML from %s due to error: %v", rawCurrentURL, err)
+		fmt.Printf("Error - getHTML: %v", err)
+		return
 	}
 
-	fmt.Printf("\nCrawling %s", rawCurrentURL)
+	// Extract all the data we care about and store it
+	pageData := extractPageData(htmlBody, rawCurrentURL)
+	cfg.setPageData(normalizedURL, pageData)
 
-	URLs, err := getURLsFromHTML(htmlBody, baseURL)
-	if err != nil {
-		log.Fatalf("unable to retrieve URLs from %s due to error: %v", rawCurrentURL, err)
-	}
-
-	for _, URL := range URLs {
-		crawlPage(rawBaseURL, URL, pages)
+	// Recurse using the already-extracted outgoing links
+	for _, nextURL := range pageData.OutgoingLinks {
+		cfg.wg.Add(1)
+		go cfg.crawlPage(nextURL)
 	}
 }
