@@ -2,13 +2,14 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 )
 
 func main() {
 	args := os.Args
 	argsWithoutProg := args[1:]
+
+	pages := map[string]int{}
 
 	if len(argsWithoutProg) < 1 {
 		fmt.Print("no website provided\n")
@@ -23,11 +24,7 @@ func main() {
 	providedURL := argsWithoutProg[0]
 	fmt.Printf("starting crawl of %s", providedURL)
 
-	html, err := getHTML(providedURL)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Println(html)
+	crawlPage(providedURL, providedURL, pages)
+	fmt.Println(pages)
 	os.Exit(0)
 }
